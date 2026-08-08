@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -45,6 +46,8 @@ const sortLabels: Record<SortMode, string> = {
 };
 
 export default function App() {
+  const { width } = useWindowDimensions();
+  const isTablet = width >= 768;
   const [mode, setMode] = useState<ViewMode>('home');
   const [level, setLevel] = useState<Level>('Level 1');
   const [words, setWords] = useState<WordEntry[]>([]);
@@ -478,9 +481,9 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
-      <Header onMenu={() => setIsLevelMenuOpen(true)} onHome={() => setMode('home')} />
+      <Header isTablet={isTablet} onMenu={() => setIsLevelMenuOpen(true)} onHome={() => setMode('home')} />
       {mode === 'home' && (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isTablet && styles.tabletContent]}>
           <View style={styles.statsRow}>
             <StatBox value={totalWords} label="전체" color="#3b82f6" onPress={() => openAllWords('all')} />
             <StatBox value={unknownWords} label="미암기" color="#fb5a67" onPress={() => openAllWords('unknown')} />
@@ -501,21 +504,23 @@ export default function App() {
               </Pressable>
             </View>
           </View>
-          {folders.map((folder) => (
-            <Pressable
-              key={folder.id}
-              style={styles.folderRow}
-              onPress={() => {
-                setActiveFolderTitle(folder.title);
-                setFolderInput(folder.title);
-                setSelectedWordIds(new Set());
-                setMode('bookDetail');
-              }}
-            >
-              <Text style={styles.folderName}>{folder.title}</Text>
-              <Text style={styles.folderCount}>{folderCounts[folder.title] ?? 0}</Text>
-            </Pressable>
-          ))}
+          <View style={[styles.folderList, isTablet && styles.tabletFolderList]}>
+            {folders.map((folder) => (
+              <Pressable
+                key={folder.id}
+                style={[styles.folderRow, isTablet && styles.tabletFolderRow]}
+                onPress={() => {
+                  setActiveFolderTitle(folder.title);
+                  setFolderInput(folder.title);
+                  setSelectedWordIds(new Set());
+                  setMode('bookDetail');
+                }}
+              >
+                <Text style={styles.folderName}>{folder.title}</Text>
+                <Text style={styles.folderCount}>{folderCounts[folder.title] ?? 0}</Text>
+              </Pressable>
+            ))}
+          </View>
           <Pressable style={styles.primaryFullButton} onPress={() => setMode('capture')}>
             <Text style={styles.primaryButtonText}>책 사진으로 단어 추가</Text>
           </Pressable>
@@ -577,7 +582,7 @@ export default function App() {
       )}
 
       {mode === 'capture' && (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isTablet && styles.tabletFormContent]}>
           <Text style={styles.sectionTitle}>책 사진 추가</Text>
           <Text style={styles.label}>단어장</Text>
           <Pressable style={styles.dropdownButton} onPress={() => setIsFolderPickerOpen(true)}>
@@ -620,7 +625,7 @@ export default function App() {
       )}
 
       {mode === 'review' && (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isTablet && styles.tabletContent]}>
           <Text style={styles.sectionTitle}>저장 전 검토</Text>
           <Text style={styles.summary}>선택 {selectedCandidateCount}개 · 중복 제외 {duplicateCandidateCount}개 · {folderInput}</Text>
           <View style={styles.actionRow}>
@@ -631,23 +636,25 @@ export default function App() {
               <Text style={styles.secondaryButtonText}>전체 해제</Text>
             </Pressable>
           </View>
-          {candidates.map((candidate) => (
-            <Pressable
-              key={candidate.id}
-              style={[styles.wordItem, candidate.selected && styles.wordItemSelected, candidate.isDuplicate && styles.faded]}
-              onPress={() => toggleCandidate(candidate.id)}
-            >
-              <View style={styles.wordHeader}>
-                <Text style={styles.word}>{candidate.selected ? '✓ ' : ''}{candidate.word}</Text>
-                <Text style={styles.meaning}>{candidate.meaning}</Text>
-              </View>
-              <Text style={styles.meta}>
-                {candidate.level} · {candidate.entryType === 'phrase' ? '숙어/구문' : candidate.partOfSpeech || 'word'}
-                {candidate.isDuplicate ? ' · 이미 저장됨' : ''}
-              </Text>
-              {candidate.example ? <Text style={styles.example}>{candidate.example}</Text> : null}
-            </Pressable>
-          ))}
+          <View style={[styles.reviewGrid, isTablet && styles.tabletReviewGrid]}>
+            {candidates.map((candidate) => (
+              <Pressable
+                key={candidate.id}
+                style={[styles.wordItem, isTablet && styles.tabletReviewItem, candidate.selected && styles.wordItemSelected, candidate.isDuplicate && styles.faded]}
+                onPress={() => toggleCandidate(candidate.id)}
+              >
+                <View style={styles.wordHeader}>
+                  <Text style={styles.word}>{candidate.selected ? '✓ ' : ''}{candidate.word}</Text>
+                  <Text style={styles.meaning}>{candidate.meaning}</Text>
+                </View>
+                <Text style={styles.meta}>
+                  {candidate.level} · {candidate.entryType === 'phrase' ? '숙어/구문' : candidate.partOfSpeech || 'word'}
+                  {candidate.isDuplicate ? ' · 이미 저장됨' : ''}
+                </Text>
+                {candidate.example ? <Text style={styles.example}>{candidate.example}</Text> : null}
+              </Pressable>
+            ))}
+          </View>
           <Pressable
             style={[styles.primaryFullButton, selectedCandidateCount === 0 && styles.disabledButton]}
             disabled={selectedCandidateCount === 0}
@@ -659,7 +666,7 @@ export default function App() {
       )}
 
       {mode === 'bookDetail' && (
-        <ScrollView contentContainerStyle={styles.detailContent}>
+        <ScrollView contentContainerStyle={[styles.detailContent, isTablet && styles.tabletDetailContent]}>
           <View style={styles.bookTitleRow}>
             <Text style={styles.bookTitle}>{activeFolderTitle} <Text style={styles.folderCount}>{activeWords.length}</Text></Text>
             <Pressable style={styles.flashcardButton} onPress={() => setMode('flashcards')}>
@@ -701,37 +708,39 @@ export default function App() {
               </>
             )}
           </View>
-          {activeWords.map((word) => (
-            <Pressable
-              key={word.id}
-              style={[styles.detailWordItem, selectedWordIds.has(word.id) && styles.wordItemSelected]}
-              onPress={() => toggleWordSelection(word.id)}
-            >
-              <View style={styles.wordHeader}>
-                <Text style={styles.detailWord}>{selectedWordIds.has(word.id) ? '✓ ' : ''}{hideMode === 'word' ? '••••' : word.word}</Text>
-                <Pressable style={styles.speakerButton} onPress={() => speak(word.word)}>
-                  <Text style={styles.speakerText}>▶</Text>
-                </Pressable>
-              </View>
-              {word.partOfSpeech ? <Text style={styles.meta}>{word.partOfSpeech}</Text> : null}
-              {hideMode !== 'meaning' ? <Text style={styles.definition}>{word.meaning}</Text> : <Text style={styles.definition}>뜻 숨김</Text>}
-              {word.example ? <Text style={styles.example}>{word.example}</Text> : null}
-              <Text style={styles.savedDate}>{word.createdAt.slice(0, 10)} 저장</Text>
-              <View style={styles.wordActions}>
-              <Pressable onPress={() => moveWord(word.id)}><Text style={styles.wordActionText}>이동</Text></Pressable>
-                <Pressable onPress={() => markKnown(word.id)}><Text style={styles.wordActionText}>외움 완료</Text></Pressable>
-                <Pressable onPress={() => deleteWord(word.id)}><Text style={styles.deleteText}>삭제</Text></Pressable>
-              </View>
-            </Pressable>
-          ))}
+          <View style={[styles.detailWordGrid, isTablet && styles.tabletDetailWordGrid]}>
+            {activeWords.map((word) => (
+              <Pressable
+                key={word.id}
+                style={[styles.detailWordItem, isTablet && styles.tabletDetailWordItem, selectedWordIds.has(word.id) && styles.wordItemSelected]}
+                onPress={() => toggleWordSelection(word.id)}
+              >
+                <View style={styles.wordHeader}>
+                  <Text style={styles.detailWord}>{selectedWordIds.has(word.id) ? '✓ ' : ''}{hideMode === 'word' ? '••••' : word.word}</Text>
+                  <Pressable style={styles.speakerButton} onPress={() => speak(word.word)}>
+                    <Text style={styles.speakerText}>▶</Text>
+                  </Pressable>
+                </View>
+                {word.partOfSpeech ? <Text style={styles.meta}>{word.partOfSpeech}</Text> : null}
+                {hideMode !== 'meaning' ? <Text style={styles.definition}>{word.meaning}</Text> : <Text style={styles.definition}>뜻 숨김</Text>}
+                {word.example ? <Text style={styles.example}>{word.example}</Text> : null}
+                <Text style={styles.savedDate}>{word.createdAt.slice(0, 10)} 저장</Text>
+                <View style={styles.wordActions}>
+                  <Pressable onPress={() => moveWord(word.id)}><Text style={styles.wordActionText}>이동</Text></Pressable>
+                  <Pressable onPress={() => markKnown(word.id)}><Text style={styles.wordActionText}>외움 완료</Text></Pressable>
+                  <Pressable onPress={() => deleteWord(word.id)}><Text style={styles.deleteText}>삭제</Text></Pressable>
+                </View>
+              </Pressable>
+            ))}
+          </View>
         </ScrollView>
       )}
 
       {mode === 'flashcards' && (
-        <View style={styles.content}>
+        <View style={[styles.content, isTablet && styles.tabletFormContent]}>
           <Text style={styles.sectionTitle}>{activeFolderTitle} 플래시카드</Text>
           {currentCard ? (
-            <View style={styles.flashcard}>
+            <View style={[styles.flashcard, isTablet && styles.tabletFlashcard]}>
               <Text style={styles.cardCount}>{flashcardIndex + 1} / {activeWords.length}</Text>
               <Pressable onPress={() => speak(currentCard.word)}>
                 <Text style={styles.cardWord}>{currentCard.word}</Text>
@@ -779,15 +788,17 @@ export default function App() {
   );
 }
 
-function Header({ onMenu, onHome }: { onMenu: () => void; onHome: () => void }) {
+function Header({ isTablet, onMenu, onHome }: { isTablet: boolean; onMenu: () => void; onHome: () => void }) {
   return (
     <View style={styles.header}>
-      <Pressable onPress={onHome}>
-        <Text style={styles.logo}>WordSnap</Text>
-      </Pressable>
-      <Pressable onPress={onMenu}>
-        <Text style={styles.menuIcon}>☰</Text>
-      </Pressable>
+      <View style={[styles.headerInner, isTablet && styles.tabletHeaderInner]}>
+        <Pressable onPress={onHome}>
+          <Text style={styles.logo}>WordSnap</Text>
+        </Pressable>
+        <Pressable onPress={onMenu}>
+          <Text style={styles.menuIcon}>☰</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -927,17 +938,26 @@ const styles = StyleSheet.create({
   header: {
     minHeight: 116,
     backgroundColor: '#0f2864',
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 28,
+    justifyContent: 'center',
     paddingTop: 28,
     paddingBottom: 18
   },
+  headerInner: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 28
+  },
+  tabletHeaderInner: { maxWidth: 1080, paddingHorizontal: 36 },
   logo: { color: '#ffffff', fontSize: 34, fontWeight: '900' },
   menuIcon: { color: '#ffffff', fontSize: 40, fontWeight: '300' },
   content: { padding: 20, gap: 16, paddingBottom: 48 },
+  tabletContent: { width: '100%', maxWidth: 1080, alignSelf: 'center', paddingHorizontal: 32 },
+  tabletFormContent: { width: '100%', maxWidth: 880, alignSelf: 'center', paddingHorizontal: 32 },
   detailContent: { paddingBottom: 48 },
+  tabletDetailContent: { width: '100%', maxWidth: 1180, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 16 },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 36 },
   statBox: {
     width: '30%',
@@ -960,7 +980,10 @@ const styles = StyleSheet.create({
   listTitle: { fontSize: 24, fontWeight: '900', color: '#111827' },
   iconRow: { flexDirection: 'row', gap: 24, alignItems: 'center' },
   headerIcon: { fontSize: 36, color: '#94a3b8', fontWeight: '300' },
+  folderList: { width: '100%' },
+  tabletFolderList: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   folderRow: { flexDirection: 'row', alignItems: 'baseline', paddingVertical: 22, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  tabletFolderRow: { width: '48.8%', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, paddingHorizontal: 18, backgroundColor: '#ffffff' },
   folderName: { fontSize: 24, color: '#2b2f36', fontWeight: '500' },
   folderCount: { fontSize: 16, color: '#9ca3af', marginLeft: 8, fontWeight: '700' },
   primaryFullButton: { minHeight: 52, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1f6feb', paddingHorizontal: 14 },
@@ -1012,7 +1035,10 @@ const styles = StyleSheet.create({
     lineHeight: 22
   },
   summary: { color: '#64748b', fontWeight: '700' },
+  reviewGrid: { gap: 16 },
+  tabletReviewGrid: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'stretch' },
   wordItem: { borderRadius: 8, backgroundColor: '#ffffff', padding: 16, gap: 10, borderWidth: 1, borderColor: '#e2e8f0' },
+  tabletReviewItem: { width: '48.8%' },
   wordItemSelected: { borderColor: '#1f6feb', backgroundColor: '#eff6ff' },
   faded: { opacity: 0.55 },
   wordHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
@@ -1057,7 +1083,10 @@ const styles = StyleSheet.create({
   optionChipActive: { backgroundColor: '#ffffff' },
   optionText: { color: '#6b7280', fontWeight: '800' },
   optionTextActive: { color: '#111827' },
+  detailWordGrid: { width: '100%' },
+  tabletDetailWordGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, paddingVertical: 16 },
   detailWordItem: { padding: 20, gap: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', backgroundColor: '#ffffff' },
+  tabletDetailWordItem: { width: '48.8%', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8 },
   detailWord: { fontSize: 40, color: '#000000', fontWeight: '500', flex: 1 },
   speakerButton: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#0f2864', alignItems: 'center', justifyContent: 'center' },
   speakerText: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
@@ -1069,6 +1098,7 @@ const styles = StyleSheet.create({
   emptyState: { minHeight: 180, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0' },
   emptyStateText: { color: '#64748b', fontWeight: '700' },
   flashcard: { minHeight: 380, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0', padding: 20, justifyContent: 'space-between', gap: 18 },
+  tabletFlashcard: { minHeight: 460, maxWidth: 720, width: '100%', alignSelf: 'center', padding: 32 },
   cardCount: { color: '#64748b', fontWeight: '800' },
   cardWord: { textAlign: 'center', color: '#172033', fontSize: 42, fontWeight: '900' },
   meaningBox: { minHeight: 96, borderRadius: 8, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', padding: 16 },
