@@ -4,6 +4,7 @@
     "slug": "wordsnap",
     "version": "2.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
       "**/*"
@@ -18,13 +19,23 @@
     "android": {
       "package": "com.marvel31.wordsnap",
       "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f2864"
+      },
       "permissions": [
         "CAMERA",
         "READ_MEDIA_IMAGES"
       ]
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f2864"
     },
     "extra": {
       "ocrSpaceApiKey": "",
