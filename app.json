@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "WordSnap",
+    "slug": "wordsnap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take a book photo to extract English words.",
+        "NSPhotoLibraryUsageDescription": "Choose a book photo to extract English words."
+      }
+    },
+    "android": {
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "ocrSpaceApiKey": "",
+      "geminiApiKey": "",
+      "geminiModel": "gemini-3.5-flash"
+    }
+  }
+}
