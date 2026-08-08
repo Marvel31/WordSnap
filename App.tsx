@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Image,
   Modal,
   Pressable,
@@ -10,6 +11,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   useWindowDimensions,
   View
 } from 'react-native';
@@ -36,6 +38,7 @@ type SortMode = 'latest' | 'oldest' | 'random' | 'az' | 'za';
 type MemoryFilter = 'all' | 'unknown' | 'known';
 type HideMode = 'none' | 'word' | 'meaning';
 const ALL_WORDS_TITLE = '전체 단어';
+const EXIT_TOAST_TIMEOUT = 2000;
 
 const sortLabels: Record<SortMode, string> = {
   latest: '최신순',
@@ -71,8 +74,10 @@ export default function App() {
   const [isLevelMenuOpen, setIsLevelMenuOpen] = useState(false);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
+  const [movingWordId, setMovingWordId] = useState<string | null>(null);
   const [folderModalValue, setFolderModalValue] = useState('새폴더');
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [lastBackPressedAt, setLastBackPressedAt] = useState(0);
 
   useEffect(() => {
     const boot = async () => {
@@ -87,6 +92,47 @@ export default function App() {
     };
     boot();
   }, []);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (isLevelMenuOpen) {
+        setIsLevelMenuOpen(false);
+        return true;
+      }
+      if (isFolderModalOpen) {
+        setIsFolderModalOpen(false);
+        setRenamingFolderId(null);
+        return true;
+      }
+      if (isFolderPickerOpen) {
+        setIsFolderPickerOpen(false);
+        return true;
+      }
+      if (movingWordId) {
+        setMovingWordId(null);
+        return true;
+      }
+      if (mode !== 'home') {
+        setMode('home');
+        setSelectedWordIds(new Set());
+        setSelectedFolderIds(new Set());
+        setIsMeaningVisible(false);
+        return true;
+      }
+
+      const now = Date.now();
+      if (now - lastBackPressedAt < EXIT_TOAST_TIMEOUT) {
+        BackHandler.exitApp();
+        return true;
+      }
+
+      setLastBackPressedAt(now);
+      ToastAndroid.show('뒤로 가기 버튼을 한 번 더 누르면 종료됩니다.', ToastAndroid.SHORT);
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [isFolderModalOpen, isFolderPickerOpen, isLevelMenuOpen, lastBackPressedAt, mode, movingWordId]);
 
   const folderCounts = useMemo(() => {
     return words.reduce<Record<string, number>>((counts, word) => {
@@ -144,10 +190,20 @@ export default function App() {
 
   const openAllWords = (filter: MemoryFilter) => {
     setActiveFolderTitle(ALL_WORDS_TITLE);
+    setSortMode('latest');
     setMemoryFilter(filter);
+    setHideMode('none');
+    setIsFilterOpen(false);
     setSelectedWordIds(new Set());
     setFlashcardIndex(0);
     setMode('bookDetail');
+  };
+
+  const resetBookDetailControls = () => {
+    setSortMode('latest');
+    setMemoryFilter('all');
+    setHideMode('none');
+    setIsFilterOpen(false);
   };
 
   const openAddFolderModal = () => {
@@ -201,9 +257,9 @@ export default function App() {
         id: `folder-${Date.now()}`,
         title,
         createdAt: new Date().toISOString(),
-        order: folders.length
+        order: 0
       };
-      await persistFolders([...folders, nextFolder]);
+      await persistFolders([nextFolder, ...folders]);
       setActiveFolderTitle(title);
       setFolderInput(title);
     }
@@ -335,14 +391,18 @@ export default function App() {
       Alert.alert('저장할 단어가 없어요', '선택된 새 단어가 없습니다.');
       return;
     }
-    if (!folders.some((folder) => folder.title === title)) {
+    const existingFolder = folders.find((folder) => folder.title === title);
+    if (existingFolder) {
+      await persistFolders([existingFolder, ...folders.filter((folder) => folder.id !== existingFolder.id)]);
+    } else {
       await persistFolders([
-        ...folders,
-        { id: `folder-${Date.now()}`, title, createdAt: new Date().toISOString(), order: folders.length }
+        { id: `folder-${Date.now()}`, title, createdAt: new Date().toISOString(), order: 0 },
+        ...folders
       ]);
     }
     await persistWords([...entries, ...words]);
     setActiveFolderTitle(title);
+    resetBookDetailControls();
     setCandidates([]);
     setMode('bookDetail');
     Alert.alert('저장 완료', `${entries.length}개 단어를 저장했어요.`);
@@ -414,31 +474,38 @@ export default function App() {
     ]);
   };
 
-  const markKnown = async (wordId: string) => {
+  const toggleKnown = async (wordId: string) => {
     await persistWords(
-      words.map((word) => (word.id === wordId ? { ...word, reviewCount: word.reviewCount + 1, knownCount: word.knownCount + 1 } : word))
+      words.map((word) =>
+        word.id === wordId
+          ? {
+              ...word,
+              reviewCount: word.reviewCount + 1,
+              knownCount: word.knownCount > 0 ? 0 : 1
+            }
+          : word
+      )
     );
   };
 
   const moveWord = (wordId: string) => {
-    const otherFolders = folders.filter((folder) => folder.title !== activeFolderTitle);
-    if (otherFolders.length === 0) {
+    if (folders.length <= 1) {
       Alert.alert('이동할 단어장이 없어요', '먼저 새 단어장을 만들어주세요.');
       return;
     }
-    Alert.alert(
-      '단어 이동',
-      '이동할 단어장을 선택하세요.',
-      [
-        ...otherFolders.slice(0, 6).map((folder) => ({
-          text: folder.title,
-          onPress: async () => {
-            await persistWords(words.map((word) => (word.id === wordId ? { ...word, bookTitle: folder.title } : word)));
-          }
-        })),
-        { text: '취소', style: 'cancel' as const }
-      ]
-    );
+    setMovingWordId(wordId);
+  };
+
+  const moveWordToFolder = async (folderTitle: string) => {
+    if (!movingWordId) {
+      return;
+    }
+    const targetFolder = folders.find((folder) => folder.title === folderTitle);
+    await persistWords(words.map((word) => (word.id === movingWordId ? { ...word, bookTitle: folderTitle } : word)));
+    if (targetFolder) {
+      await persistFolders([targetFolder, ...folders.filter((folder) => folder.id !== targetFolder.id)]);
+    }
+    setMovingWordId(null);
   };
 
   const toggleWordSelection = (wordId: string) => {
@@ -470,7 +537,7 @@ export default function App() {
       return;
     }
     if (known) {
-      await markKnown(currentCard.id);
+      await toggleKnown(currentCard.id);
     } else {
       await persistWords(words.map((word) => (word.id === currentCard.id ? { ...word, reviewCount: word.reviewCount + 1 } : word)));
     }
@@ -512,6 +579,7 @@ export default function App() {
                 onPress={() => {
                   setActiveFolderTitle(folder.title);
                   setFolderInput(folder.title);
+                  resetBookDetailControls();
                   setSelectedWordIds(new Set());
                   setMode('bookDetail');
                 }}
@@ -724,10 +792,13 @@ export default function App() {
                 {word.partOfSpeech ? <Text style={styles.meta}>{word.partOfSpeech}</Text> : null}
                 {hideMode !== 'meaning' ? <Text style={styles.definition}>{word.meaning}</Text> : <Text style={styles.definition}>뜻 숨김</Text>}
                 {word.example ? <Text style={styles.example}>{word.example}</Text> : null}
-                <Text style={styles.savedDate}>{word.createdAt.slice(0, 10)} 저장</Text>
                 <View style={styles.wordActions}>
                   <Pressable onPress={() => moveWord(word.id)}><Text style={styles.wordActionText}>이동</Text></Pressable>
-                  <Pressable onPress={() => markKnown(word.id)}><Text style={styles.wordActionText}>외움 완료</Text></Pressable>
+                  <Pressable onPress={() => toggleKnown(word.id)}>
+                    <Text style={word.knownCount > 0 ? styles.knownToggleText : styles.wordActionText}>
+                      {word.knownCount > 0 ? '암기 완료' : '미암기'}
+                    </Text>
+                  </Pressable>
                   <Pressable onPress={() => deleteWord(word.id)}><Text style={styles.deleteText}>삭제</Text></Pressable>
                 </View>
               </Pressable>
@@ -784,6 +855,13 @@ export default function App() {
           setIsFolderPickerOpen(false);
         }}
       />
+      <MoveWordModal
+        visible={movingWordId !== null}
+        folders={folders}
+        currentTitle={words.find((word) => word.id === movingWordId)?.bookTitle || activeFolderTitle}
+        onClose={() => setMovingWordId(null)}
+        onSelect={moveWordToFolder}
+      />
     </SafeAreaView>
   );
 }
@@ -792,9 +870,14 @@ function Header({ isTablet, onMenu, onHome }: { isTablet: boolean; onMenu: () =>
   return (
     <View style={styles.header}>
       <View style={[styles.headerInner, isTablet && styles.tabletHeaderInner]}>
-        <Pressable onPress={onHome}>
-          <Text style={styles.logo}>WordSnap</Text>
-        </Pressable>
+        <View style={styles.headerBrand}>
+          <Pressable style={styles.homeButton} onPress={onHome}>
+            <Text style={styles.homeIcon}>⌂</Text>
+          </Pressable>
+          <Pressable onPress={onHome}>
+            <Text style={styles.logo}>WordSnap</Text>
+          </Pressable>
+        </View>
         <Pressable onPress={onMenu}>
           <Text style={styles.menuIcon}>☰</Text>
         </Pressable>
@@ -933,6 +1016,48 @@ function FolderPickerModal({
   );
 }
 
+function MoveWordModal({
+  visible,
+  folders,
+  currentTitle,
+  onSelect,
+  onClose
+}: {
+  visible: boolean;
+  folders: BookFolder[];
+  currentTitle: string;
+  onSelect: (title: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <View style={styles.pickerModal}>
+          <Text style={styles.folderModalTitle}>단어장 이동</Text>
+          <View style={styles.moveDropdownHeader}>
+            <Text style={styles.dropdownButtonText}>{currentTitle}</Text>
+            <Text style={styles.dropdownIcon}>⌄</Text>
+          </View>
+          {folders.map((folder) => {
+            const isCurrent = folder.title === currentTitle;
+            return (
+              <Pressable
+                key={folder.id}
+                style={[styles.pickerRow, isCurrent && styles.disabledButton]}
+                disabled={isCurrent}
+                onPress={() => onSelect(folder.title)}
+              >
+                <Text style={styles.pickerTitle}>{folder.title}</Text>
+                <Text style={styles.pickerCheck}>{isCurrent ? '현재' : ''}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#ffffff' },
   header: {
@@ -951,6 +1076,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28
   },
   tabletHeaderInner: { maxWidth: 1080, paddingHorizontal: 36 },
+  headerBrand: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 },
+  homeButton: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
+  homeIcon: { color: '#ffffff', fontSize: 27, fontWeight: '900', lineHeight: 32 },
   logo: { color: '#ffffff', fontSize: 34, fontWeight: '900' },
   menuIcon: { color: '#ffffff', fontSize: 40, fontWeight: '300' },
   content: { padding: 20, gap: 16, paddingBottom: 48 },
@@ -1091,9 +1219,9 @@ const styles = StyleSheet.create({
   speakerButton: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#0f2864', alignItems: 'center', justifyContent: 'center' },
   speakerText: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
   definition: { backgroundColor: '#f8fafc', padding: 16, fontSize: 18, color: '#111827', lineHeight: 28 },
-  savedDate: { color: '#9ca3af', fontSize: 16, fontWeight: '700' },
   wordActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 28 },
   wordActionText: { color: '#9ca3af', fontSize: 16, fontWeight: '800' },
+  knownToggleText: { color: '#1f6feb', fontSize: 16, fontWeight: '900' },
   deleteText: { color: '#dc2626', fontSize: 16, fontWeight: '800' },
   emptyState: { minHeight: 180, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0' },
   emptyStateText: { color: '#64748b', fontWeight: '700' },
@@ -1115,6 +1243,19 @@ const styles = StyleSheet.create({
   pickerRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
   pickerTitle: { color: '#172033', fontSize: 20, fontWeight: '800', flex: 1 },
   pickerCheck: { color: '#1f6feb', fontSize: 24, fontWeight: '900', marginLeft: 12 },
+  moveDropdownHeader: {
+    minHeight: 58,
+    marginHorizontal: 24,
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
   folderModalTitle: { textAlign: 'center', fontSize: 24, fontWeight: '900', marginBottom: 24 },
   folderInputWrap: { marginHorizontal: 28, borderWidth: 1, borderColor: '#e5e7eb', padding: 8, flexDirection: 'row', alignItems: 'center' },
   folderModalInput: { flex: 1, minHeight: 44, borderWidth: 2, borderColor: '#f59e0b', borderRadius: 6, paddingHorizontal: 8, fontSize: 20 },
