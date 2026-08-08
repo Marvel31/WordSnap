@@ -50,6 +50,35 @@ const difficultyToLevel = (difficulty: number): Level => {
   return 'Level 1';
 };
 
+const LEVEL_EXTRACTION_GUIDANCE: Record<Level, string[]> = {
+  'Level 1': [
+    '1. User selected Level 1. Extract broadly: include most readable content words and useful phrases from the text.',
+    '   Include simple nouns, verbs, adjectives, adverbs, phrasal verbs, and expressions even when difficulty is 1.',
+    '   Exclude only low-value grammar/function words by themselves, such as articles, pronouns, auxiliary verbs, conjunctions, and prepositions, unless they are part of a phrase.',
+    '   For a normal book page, prefer returning many candidates rather than being selective.'
+  ],
+  'Level 2': [
+    '1. User selected Level 2. Return entries with difficulty 2-5.',
+    '   Target upper elementary level and above: common but useful story words, basic academic words, everyday phrasal verbs, and simple expressions.',
+    '   Skip very basic Level 1 words such as book, day, go, make, good, big, unless they form a useful phrase.'
+  ],
+  'Level 3': [
+    '1. User selected Level 3. Return entries with difficulty 3-5.',
+    '   Target middle school level and above: less basic verbs/adjectives, abstract nouns, story vocabulary, and useful idioms or fixed expressions.',
+    '   Skip ordinary elementary words unless the phrase itself is worth memorizing.'
+  ],
+  'Level 4': [
+    '1. User selected Level 4. Return entries with difficulty 4-5.',
+    '   Target high school level and above: academic words, abstract words, nuanced verbs/adjectives, and harder expressions.',
+    '   Be selective; do not include common middle-school words.'
+  ],
+  'Level 5': [
+    '1. User selected Level 5. Return only difficulty 5 entries.',
+    '   Target advanced high school senior, CSAT-style, or college-prep vocabulary: rare, abstract, academic, literary, or high-value advanced expressions.',
+    '   Be very selective and return fewer entries.'
+  ]
+};
+
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z\s-]/g, '').replace(/\s+/g, ' ').trim();
 
 const parseJsonArray = (text: string) => {
@@ -195,16 +224,19 @@ const toCandidates = (items: GeminiVocabularyItem[], ocrText: string, existingWo
 
 export const extractWordCandidatesWithGemini = async (ocrText: string, selectedLevel: Level, existingWords: string[]) => {
   const minDifficulty = LEVEL_MIN_DIFFICULTY[selectedLevel];
+  const levelRule = LEVEL_EXTRACTION_GUIDANCE[selectedLevel].join('\n');
   const prompt = [
     'You are extracting vocabulary candidates from OCR text for a Korean English-learning app.',
     'Return only useful vocabulary entries as JSON array. Do not wrap in markdown.',
     'Rules:',
-    `1. User selected ${selectedLevel}. Return only entries with difficulty >= ${minDifficulty}.`,
+    levelRule,
     '2. Correct OCR errors and broken fragments using context. Example: "Pennsylva- nia" or "pennsylva" + "nia" should become "Pennsylvania".',
     '3. Do not return meaningless OCR fragments such as "nia" when they are part of a broken word.',
     '4. Save dictionary headwords. Example: "climbed" -> "climb", "found" -> "find", "appeared" -> "appear".',
     '5. If a phrase, idiom, phrasal verb, or fixed expression is better to memorize together, return it as one phrase entry.',
-    '6. Exclude common stop words and proper nouns unless useful for understanding the text.',
+    selectedLevel === 'Level 1'
+      ? '6. Proper nouns may be included when they are important for understanding the passage; otherwise skip names that are not useful vocabulary.'
+      : '6. Exclude common stop words and proper nouns unless useful for understanding the text.',
     '7. Use concise Korean meanings, English part of speech, simple English example sentences, and difficulty 1-5.',
     '8. entryType must be "word" or "phrase". sourceWords must list OCR words/fragments used for the entry.',
     `Existing saved terms to mark as duplicates: ${existingWords.join(', ') || '(none)'}`,

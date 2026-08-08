@@ -47,6 +47,7 @@ export const cleanOcrText = (text: string) =>
 export const buildWordCandidates = (text: string, selectedLevel: Level, existingWords: string[]): WordCandidate[] => {
   const cleanedText = cleanOcrText(text);
   const minDifficulty = LEVEL_MIN_DIFFICULTY[selectedLevel];
+  const isBroadLevel = selectedLevel === 'Level 1';
   const existing = new Set(existingWords.map((word) => word.toLowerCase()));
   const seen = new Set<string>();
   const sentences = cleanedText.split(/(?<=[.!?])\s+/);
@@ -54,7 +55,11 @@ export const buildWordCandidates = (text: string, selectedLevel: Level, existing
 
   return tokens.reduce<WordCandidate[]>((candidates, token) => {
     const word = normalizeWord(token);
-    if (!word || word.length < 2 || STOP_WORDS.has(word) || seen.has(word)) {
+    if (!word || word.length < 2 || seen.has(word)) {
+      return candidates;
+    }
+
+    if (!isBroadLevel && STOP_WORDS.has(word)) {
       return candidates;
     }
 

@@ -2,7 +2,17 @@ import Constants from 'expo-constants';
 
 type OcrSpaceResponse = {
   ParsedResults?: Array<{ ParsedText?: string }>;
+  OCRExitCode?: number;
+  IsErroredOnProcessing?: boolean;
   ErrorMessage?: string | string[];
+  ErrorDetails?: string;
+};
+
+const toErrorText = (value?: string | string[]) => {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).join(', ');
+  }
+  return value;
 };
 
 export const readTextFromImage = async (uri: string) => {
@@ -29,11 +39,19 @@ export const readTextFromImage = async (uri: string) => {
     body: formData
   });
 
-  const data = (await response.json()) as OcrSpaceResponse;
+  let data: OcrSpaceResponse;
+  try {
+    data = (await response.json()) as OcrSpaceResponse;
+  } catch {
+    throw new Error(`OCR 서버 응답을 읽지 못했어요. HTTP ${response.status}`);
+  }
+
   const text = data.ParsedResults?.map((result) => result.ParsedText?.trim()).filter(Boolean).join('\n').trim();
-  if (!response.ok || !text) {
-    const errorMessage = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join(', ') : data.ErrorMessage;
-    throw new Error(errorMessage || 'OCR_FAILED');
+  if (!response.ok || data.IsErroredOnProcessing || !text) {
+    const errorMessage = toErrorText(data.ErrorMessage);
+    const details = data.ErrorDetails;
+    const status = response.ok ? undefined : `HTTP ${response.status}`;
+    throw new Error(errorMessage || details || status || 'OCR 결과가 비어 있어요. 사진을 더 선명하게 찍거나 직접 입력해 주세요.');
   }
   return text;
 };

@@ -62,7 +62,7 @@ export default function App() {
   const [sortMode, setSortMode] = useState<SortMode>('latest');
   const [memoryFilter, setMemoryFilter] = useState<MemoryFilter>('all');
   const [hideMode, setHideMode] = useState<HideMode>('none');
-  const [isFilterOpen, setIsFilterOpen] = useState(true);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [flashcardIndex, setFlashcardIndex] = useState(0);
   const [isMeaningVisible, setIsMeaningVisible] = useState(false);
   const [isLevelMenuOpen, setIsLevelMenuOpen] = useState(false);
@@ -273,7 +273,7 @@ export default function App() {
       if (message === 'OCR_API_KEY_MISSING') {
         Alert.alert('OCR 키가 없어요', '.env의 OCR_SPACE_API_KEY를 설정하고 Expo 서버를 다시 시작해주세요.');
       } else {
-        Alert.alert('글자 추출 실패', '텍스트를 직접 수정한 뒤 진행할 수 있습니다.');
+        Alert.alert('글자 추출 실패', `${message}\n\n텍스트를 직접 수정한 뒤 진행할 수 있습니다.`);
       }
     } finally {
       setIsReading(false);
@@ -631,13 +631,6 @@ export default function App() {
               <Text style={styles.secondaryButtonText}>전체 해제</Text>
             </Pressable>
           </View>
-          <Pressable
-            style={[styles.primaryFullButton, (selectedCandidateCount === 0 || isEnriching) && styles.disabledButton]}
-            disabled={selectedCandidateCount === 0 || isEnriching}
-            onPress={enrichSelectedCandidates}
-          >
-            <Text style={styles.primaryButtonText}>{isEnriching ? 'AI 생성 중...' : '선택 단어 뜻/예문 생성'}</Text>
-          </Pressable>
           {candidates.map((candidate) => (
             <Pressable
               key={candidate.id}
