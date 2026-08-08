@@ -3,6 +3,7 @@ node_modules/
 .expo-test-export/
 dist/
 build/
+releases/
 *.log
 .env
 .env.*
