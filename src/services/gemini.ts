@@ -89,6 +89,9 @@ const parseJsonArray = (text: string) => {
   return JSON.parse(json) as GeminiVocabularyItem[];
 };
 
+const stripCodeBlock = (text: string) =>
+  text.trim().replace(/^```(?:text)?\s*/i, '').replace(/```$/i, '').trim();
+
 const buildSchema = () => ({
   type: 'ARRAY',
   items: {
@@ -111,7 +114,7 @@ const buildSchema = () => ({
   }
 });
 
-const requestVocabularyItems = async (prompt: string) => {
+const requestGeminiText = async (prompt: string, generationConfig: Record<string, unknown>) => {
   const apiKey = Constants.expoConfig?.extra?.geminiApiKey as string | undefined;
   const model = (Constants.expoConfig?.extra?.geminiModel as string | undefined) ?? 'gemini-3.5-flash';
 
@@ -129,11 +132,7 @@ const requestVocabularyItems = async (prompt: string) => {
         ]
       }
     ],
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: 'application/json',
-      responseSchema: buildSchema()
-    }
+    generationConfig
   };
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -172,7 +171,40 @@ const requestVocabularyItems = async (prompt: string) => {
     throw new Error(data.error?.message || 'GEMINI_FAILED');
   }
 
-  return parseJsonArray(text);
+  return text;
+};
+
+const requestVocabularyItems = async (prompt: string) =>
+  parseJsonArray(
+    await requestGeminiText(prompt, {
+      temperature: 0.1,
+      responseMimeType: 'application/json',
+      responseSchema: buildSchema()
+    })
+  );
+
+export const cleanOcrTextWithGemini = async (ocrText: string) => {
+  const prompt = [
+    'You are cleaning OCR output from an English book page for a Korean vocabulary-learning app.',
+    'Return only the cleaned English text. Do not explain. Do not wrap in markdown.',
+    'Rules:',
+    '1. Preserve the original passage meaning and wording as much as possible.',
+    '2. Fix OCR line-break errors and hyphenated split words. Example: "Pennsylva-\\nnia" -> "Pennsylvania".',
+    '3. Restore clearly missing letters using context. Example: "mysteriou" -> "mysterious".',
+    '4. Fix obvious spacing, capitalization, and punctuation problems.',
+    '5. Remove meaningless OCR fragments only when they are clearly part of a broken word.',
+    '6. Do not summarize, translate, add new sentences, or rewrite the passage creatively.',
+    '7. Keep paragraph breaks when useful.',
+    `OCR text:\n${ocrText}`
+  ].join('\n');
+
+  const cleaned = stripCodeBlock(
+    await requestGeminiText(prompt, {
+      temperature: 0
+    })
+  );
+
+  return cleaned || ocrText;
 };
 
 const findSourceSentence = (ocrText: string, term: string, sourceWords: string[]) => {

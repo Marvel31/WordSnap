@@ -15,11 +15,14 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
+import * as Sharing from 'expo-sharing';
 import * as Speech from 'expo-speech';
 import { StatusBar } from 'expo-status-bar';
 import { LEVEL_DESCRIPTIONS, LEVEL_MIN_DIFFICULTY, LEVELS } from './src/data/levelWords';
-import { enrichWordCandidates, extractWordCandidatesWithGemini } from './src/services/gemini';
+import { cleanOcrTextWithGemini, enrichWordCandidates, extractWordCandidatesWithGemini } from './src/services/gemini';
 import { readTextFromImage } from './src/services/ocr';
 import {
   DEFAULT_BOOK_TITLE,
@@ -39,6 +42,7 @@ type MemoryFilter = 'all' | 'unknown' | 'known';
 type HideMode = 'none' | 'word' | 'meaning';
 const ALL_WORDS_TITLE = '전체 단어';
 const EXIT_TOAST_TIMEOUT = 2000;
+const EXPORT_VERSION = 1;
 
 const sortLabels: Record<SortMode, string> = {
   latest: '최신순',
@@ -112,6 +116,11 @@ export default function App() {
         setMovingWordId(null);
         return true;
       }
+      if (mode === 'flashcards') {
+        setMode('bookDetail');
+        setIsMeaningVisible(false);
+        return true;
+      }
       if (mode !== 'home') {
         setMode('home');
         setSelectedWordIds(new Set());
@@ -171,11 +180,11 @@ export default function App() {
     return copy.sort((a, b) => a.id.localeCompare(b.id)).sort(() => Math.random() - 0.5);
   }, [activeFolderTitle, isAllWordsMode, level, memoryFilter, sortMode, words]);
 
-  const currentCard = activeWords[flashcardIndex % Math.max(activeWords.length, 1)];
+  const flashcardWords = useMemo(() => activeWords.filter((word) => word.knownCount === 0), [activeWords]);
+  const currentCard = flashcardWords[flashcardIndex % Math.max(flashcardWords.length, 1)];
   const selectableCandidates = candidates.filter((candidate) => !candidate.isDuplicate);
   const selectedCandidateCount = selectableCandidates.filter((candidate) => candidate.selected).length;
   const duplicateCandidateCount = candidates.filter((candidate) => candidate.isDuplicate).length;
-  const selectedVisibleWordCount = activeWords.filter((word) => selectedWordIds.has(word.id)).length;
 
   const persistWords = async (nextWords: WordEntry[]) => {
     setWords(nextWords);
@@ -326,7 +335,16 @@ export default function App() {
     setIsReading(true);
     try {
       const text = await readTextFromImage(uri);
-      setOcrText(text);
+      try {
+        const cleanedText = await cleanOcrTextWithGemini(text);
+        setOcrText(cleanedText);
+      } catch (cleanError) {
+        setOcrText(text);
+        const cleanMessage = cleanError instanceof Error ? cleanError.message : 'GEMINI_FAILED';
+        if (cleanMessage !== 'GEMINI_API_KEY_MISSING') {
+          Alert.alert('AI 문장 정리 실패', 'OCR 원문을 표시합니다. 직접 수정한 뒤 진행할 수 있어요.');
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'OCR_FAILED';
       if (message === 'OCR_API_KEY_MISSING') {
@@ -488,6 +506,20 @@ export default function App() {
     );
   };
 
+  const setKnown = async (wordId: string, known: boolean) => {
+    await persistWords(
+      words.map((word) =>
+        word.id === wordId
+          ? {
+              ...word,
+              reviewCount: word.reviewCount + 1,
+              knownCount: known ? Math.max(word.knownCount, 1) : 0
+            }
+          : word
+      )
+    );
+  };
+
   const moveWord = (wordId: string) => {
     if (folders.length <= 1) {
       Alert.alert('이동할 단어장이 없어요', '먼저 새 단어장을 만들어주세요.');
@@ -537,12 +569,101 @@ export default function App() {
       return;
     }
     if (known) {
-      await toggleKnown(currentCard.id);
+      await setKnown(currentCard.id, true);
+      setFlashcardIndex((index) => (flashcardWords.length <= 1 ? 0 : index % (flashcardWords.length - 1)));
     } else {
       await persistWords(words.map((word) => (word.id === currentCard.id ? { ...word, reviewCount: word.reviewCount + 1 } : word)));
+      setFlashcardIndex((index) => (index + 1) % Math.max(flashcardWords.length, 1));
     }
     setIsMeaningVisible(false);
-    setFlashcardIndex((index) => (index + 1) % Math.max(activeWords.length, 1));
+  };
+
+  const exportVocabulary = async () => {
+    try {
+      const payload = {
+        app: 'WordSnap',
+        version: EXPORT_VERSION,
+        exportedAt: new Date().toISOString(),
+        level,
+        folders,
+        words
+      };
+      const exportFile = new FileSystem.File(FileSystem.Paths.cache, `wordsnap-export-${Date.now()}.json`);
+      exportFile.write(JSON.stringify(payload, null, 2));
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Alert.alert('내보내기 실패', '이 기기에서는 파일 공유를 사용할 수 없어요.');
+        return;
+      }
+      await Sharing.shareAsync(exportFile.uri, {
+        mimeType: 'application/json',
+        dialogTitle: 'WordSnap 단어장 내보내기',
+        UTI: 'public.json'
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'EXPORT_FAILED';
+      Alert.alert('내보내기 실패', message);
+    }
+  };
+
+  const importVocabulary = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true
+      });
+      if (result.canceled) {
+        return;
+      }
+
+      const file = result.assets[0];
+      const importFile = new FileSystem.File(file.uri);
+      const raw = await importFile.text();
+      const data = JSON.parse(raw) as { folders?: BookFolder[]; words?: WordEntry[]; level?: Level };
+      if (!Array.isArray(data.words)) {
+        Alert.alert('가져오기 실패', 'WordSnap 단어장 파일이 아니에요.');
+        return;
+      }
+
+      const importedWords = data.words.map((word, index) => ({
+        ...word,
+        id: word.id || `imported-${Date.now()}-${index}`,
+        bookTitle: word.bookTitle?.trim() || DEFAULT_BOOK_TITLE,
+        createdAt: word.createdAt || new Date().toISOString(),
+        reviewCount: word.reviewCount ?? 0,
+        knownCount: word.knownCount ?? 0
+      }));
+      const existingKeys = new Set(words.map((word) => `${word.bookTitle || DEFAULT_BOOK_TITLE}::${word.word.toLowerCase()}`));
+      const newWords = importedWords.filter((word) => !existingKeys.has(`${word.bookTitle || DEFAULT_BOOK_TITLE}::${word.word.toLowerCase()}`));
+
+      const folderByTitle = new Map<string, BookFolder>();
+      [...(data.folders ?? []), ...folders].forEach((folder) => {
+        if (folder.title?.trim() && !folderByTitle.has(folder.title)) {
+          folderByTitle.set(folder.title, folder);
+        }
+      });
+      newWords.forEach((word) => {
+        const title = word.bookTitle || DEFAULT_BOOK_TITLE;
+        if (!folderByTitle.has(title)) {
+          folderByTitle.set(title, {
+            id: `folder-imported-${Date.now()}-${folderByTitle.size}`,
+            title,
+            createdAt: new Date().toISOString(),
+            order: folderByTitle.size
+          });
+        }
+      });
+
+      await persistWords([...newWords, ...words]);
+      await persistFolders(Array.from(folderByTitle.values()));
+      if (data.level) {
+        await changeLevel(data.level);
+      }
+      Alert.alert('가져오기 완료', `${newWords.length}개 단어를 가져왔어요.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'IMPORT_FAILED';
+      Alert.alert('가져오기 실패', message);
+    }
   };
 
   return (
@@ -557,9 +678,12 @@ export default function App() {
             <StatBox value={knownWords} label="암기" color="#22a018" onPress={() => openAllWords('known')} />
           </View>
           <View style={styles.fakeAd}>
-            <Text style={styles.fakeAdText}>WordSnap</Text>
+            <Text style={styles.fakeAdText}>Word Snap</Text>
             <Text style={styles.fakeAdSub}>책에서 찾은 단어를 단어장으로 모아보세요.</Text>
           </View>
+          <Pressable style={styles.primaryFullButton} onPress={() => setMode('capture')}>
+            <Text style={styles.primaryButtonText}>책 사진으로 단어 추가</Text>
+          </Pressable>
           <View style={styles.listHeader}>
             <Text style={styles.listTitle}>단어장 목록</Text>
             <View style={styles.iconRow}>
@@ -589,9 +713,6 @@ export default function App() {
               </Pressable>
             ))}
           </View>
-          <Pressable style={styles.primaryFullButton} onPress={() => setMode('capture')}>
-            <Text style={styles.primaryButtonText}>책 사진으로 단어 추가</Text>
-          </Pressable>
         </ScrollView>
       )}
 
@@ -606,6 +727,14 @@ export default function App() {
           <Pressable style={styles.addFolderRow} onPress={openAddFolderModal}>
             <Text style={styles.addFolderText}>＋ 새폴더 추가</Text>
           </Pressable>
+          <View style={styles.importExportRow}>
+            <Pressable style={styles.secondaryButton} onPress={exportVocabulary}>
+              <Text style={styles.secondaryButtonText}>내보내기</Text>
+            </Pressable>
+            <Pressable style={styles.secondaryButton} onPress={importVocabulary}>
+              <Text style={styles.secondaryButtonText}>가져오기</Text>
+            </Pressable>
+          </View>
           <ScrollView>
             {folders.map((folder, index) => (
               <View key={folder.id} style={styles.folderSettingRow}>
@@ -673,12 +802,12 @@ export default function App() {
             </View>
           )}
           {isReading && <ActivityIndicator size="large" color="#12306b" />}
-          <Text style={styles.label}>추출된 문장</Text>
+          <Text style={styles.label}>정리된 문장</Text>
           <TextInput
             value={ocrText}
             onChangeText={setOcrText}
             multiline
-            placeholder="OCR 결과가 여기에 표시됩니다."
+            placeholder="OCR 결과를 AI가 정리해서 여기에 표시합니다."
             style={styles.textArea}
             textAlignVertical="top"
           />
@@ -780,11 +909,10 @@ export default function App() {
             {activeWords.map((word) => (
               <Pressable
                 key={word.id}
-                style={[styles.detailWordItem, isTablet && styles.tabletDetailWordItem, selectedWordIds.has(word.id) && styles.wordItemSelected]}
-                onPress={() => toggleWordSelection(word.id)}
+                style={[styles.detailWordItem, isTablet && styles.tabletDetailWordItem]}
               >
                 <View style={styles.wordHeader}>
-                  <Text style={styles.detailWord}>{selectedWordIds.has(word.id) ? '✓ ' : ''}{hideMode === 'word' ? '••••' : word.word}</Text>
+                  <Text style={styles.detailWord}>{hideMode === 'word' ? '••••' : word.word}</Text>
                   <Pressable style={styles.speakerButton} onPress={() => speak(word.word)}>
                     <Text style={styles.speakerText}>▶</Text>
                   </Pressable>
@@ -812,10 +940,15 @@ export default function App() {
           <Text style={styles.sectionTitle}>{activeFolderTitle} 플래시카드</Text>
           {currentCard ? (
             <View style={[styles.flashcard, isTablet && styles.tabletFlashcard]}>
-              <Text style={styles.cardCount}>{flashcardIndex + 1} / {activeWords.length}</Text>
-              <Pressable onPress={() => speak(currentCard.word)}>
-                <Text style={styles.cardWord}>{currentCard.word}</Text>
-              </Pressable>
+              <Text style={styles.cardCount}>{flashcardIndex + 1} / {flashcardWords.length}</Text>
+              <View style={styles.cardWordRow}>
+                <Pressable style={styles.cardWordPressable} onPress={() => speak(currentCard.word)}>
+                  <Text style={styles.cardWord}>{currentCard.word}</Text>
+                </Pressable>
+                <Pressable style={styles.speakerButton} onPress={() => speak(currentCard.word)}>
+                  <Text style={styles.speakerText}>▶</Text>
+                </Pressable>
+              </View>
               <Pressable style={styles.meaningBox} onPress={() => setIsMeaningVisible((visible) => !visible)}>
                 <Text style={styles.cardMeaning}>{isMeaningVisible ? currentCard.meaning : '뜻 보기'}</Text>
                 {isMeaningVisible && currentCard.example ? <Text style={styles.cardExample}>{currentCard.example}</Text> : null}
@@ -875,7 +1008,7 @@ function Header({ isTablet, onMenu, onHome }: { isTablet: boolean; onMenu: () =>
             <Text style={styles.homeIcon}>⌂</Text>
           </Pressable>
           <Pressable onPress={onHome}>
-            <Text style={styles.logo}>WordSnap</Text>
+            <Text style={styles.logo}>Word Snap</Text>
           </Pressable>
         </View>
         <Pressable onPress={onMenu}>
@@ -889,7 +1022,7 @@ function Header({ isTablet, onMenu, onHome }: { isTablet: boolean; onMenu: () =>
 function StatBox({ value, label, color, onPress }: { value: number; label: string; color: string; onPress: () => void }) {
   return (
     <Pressable style={styles.statBox} onPress={onPress}>
-      <Text style={[styles.statDash, { color }]}>-</Text>
+      <View style={[styles.statDash, { backgroundColor: color }]} />
       <Text style={[styles.statValue, { color }]}>{value}</Text>
       <Text style={[styles.statLabel, { color }]}>{label}</Text>
     </Pressable>
@@ -1095,11 +1228,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    paddingTop: 12,
+    paddingTop: 28,
     paddingBottom: 18
   },
-  statDash: { fontSize: 22, fontWeight: '800', lineHeight: 20 },
-  statValue: { fontSize: 38, fontWeight: '900', lineHeight: 46 },
+  statDash: { width: 22, height: 4, borderRadius: 2, marginTop: 4, marginBottom: 8 },
+  statValue: { fontSize: 38, fontWeight: '900', lineHeight: 44 },
   statLabel: { fontSize: 17, fontWeight: '800', marginTop: 14, marginBottom: 6 },
   fakeAd: { backgroundColor: '#f1f5f9', padding: 22, marginHorizontal: -20 },
   fakeAdText: { fontSize: 22, fontWeight: '900', color: '#172033' },
@@ -1181,6 +1314,7 @@ const styles = StyleSheet.create({
   closeText: { color: '#ffffff', fontSize: 46, fontWeight: '200' },
   addFolderRow: { height: 72, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   addFolderText: { color: '#8b8f98', fontSize: 22, fontWeight: '700' },
+  importExportRow: { flexDirection: 'row', gap: 10, padding: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   folderSettingRow: { minHeight: 80, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   circle: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#e5e7eb' },
   circleSelected: { backgroundColor: '#1f6feb', borderColor: '#1f6feb' },
@@ -1229,6 +1363,8 @@ const styles = StyleSheet.create({
   tabletFlashcard: { minHeight: 460, maxWidth: 720, width: '100%', alignSelf: 'center', padding: 32 },
   cardCount: { color: '#64748b', fontWeight: '800' },
   cardWord: { textAlign: 'center', color: '#172033', fontSize: 42, fontWeight: '900' },
+  cardWordRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14 },
+  cardWordPressable: { flexShrink: 1 },
   meaningBox: { minHeight: 96, borderRadius: 8, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', padding: 16 },
   cardMeaning: { color: '#1f6feb', fontSize: 24, fontWeight: '900', textAlign: 'center' },
   cardExample: { color: '#475569', fontSize: 14, fontWeight: '600', lineHeight: 20, marginTop: 10, textAlign: 'center' },
