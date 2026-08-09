@@ -23,6 +23,7 @@ import * as Speech from 'expo-speech';
 import { StatusBar } from 'expo-status-bar';
 import { LEVEL_DESCRIPTIONS, LEVEL_MIN_DIFFICULTY, LEVELS } from './src/data/levelWords';
 import { cleanOcrTextWithGemini, enrichWordCandidates, extractWordCandidatesWithGemini } from './src/services/gemini';
+import { createOcrImageSegments, joinOcrSegmentTexts, prepareImageForOcr } from './src/services/imageForOcr';
 import { readTextFromImage } from './src/services/ocr';
 import {
   DEFAULT_BOOK_TITLE,
@@ -312,6 +313,37 @@ export default function App() {
     ]);
   };
 
+  const readTextFromBookImage = async (uri: string) => {
+    const preparedImage = await prepareImageForOcr(uri);
+    try {
+      return await readTextFromImage(preparedImage.uri);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OCR_FAILED';
+      if (message === 'OCR_API_KEY_MISSING') {
+        throw error;
+      }
+
+      const segmentUris = await createOcrImageSegments(preparedImage);
+      const segmentTexts: string[] = [];
+      for (const segmentUri of segmentUris) {
+        try {
+          const segmentText = await readTextFromImage(segmentUri);
+          if (segmentText.trim()) {
+            segmentTexts.push(segmentText);
+          }
+        } catch {
+          // Keep trying the remaining segments. A partial result is still useful for review.
+        }
+      }
+
+      const joinedText = joinOcrSegmentTexts(segmentTexts);
+      if (!joinedText.trim()) {
+        throw error;
+      }
+      return joinedText;
+    }
+  };
+
   const pickImage = async (source: 'camera' | 'library') => {
     const permission =
       source === 'camera'
@@ -334,7 +366,7 @@ export default function App() {
     setImageUri(uri);
     setIsReading(true);
     try {
-      const text = await readTextFromImage(uri);
+      const text = await readTextFromBookImage(uri);
       try {
         const cleanedText = await cleanOcrTextWithGemini(text);
         setOcrText(cleanedText);
