@@ -35,6 +35,9 @@ module.exports = ({ config }) => ({
     ...appJson.expo.extra,
     ocrSpaceApiKey: process.env.OCR_SPACE_API_KEY || appJson.expo.extra.ocrSpaceApiKey,
     geminiApiKey: process.env.GEMINI_API_KEY || appJson.expo.extra.geminiApiKey,
-    geminiModel: process.env.GEMINI_MODEL || appJson.expo.extra.geminiModel
+    geminiModel: process.env.GEMINI_MODEL || appJson.expo.extra.geminiModel,
+    aiProvider: process.env.AI_PROVIDER || appJson.expo.extra.aiProvider,
+    groqApiKey: process.env.GROQ_API_KEY || appJson.expo.extra.groqApiKey,
+    groqModel: process.env.GROQ_MODEL || appJson.expo.extra.groqModel
   }
 });

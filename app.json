@@ -2,7 +2,7 @@
   "expo": {
     "name": "Word Snap",
     "slug": "wordsnap",
-    "version": "2.1.1",
+    "version": "2.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.marvel31.wordsnap",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f2864"
@@ -41,6 +41,9 @@
       "ocrSpaceApiKey": "",
       "geminiApiKey": "",
       "geminiModel": "gemini-3.5-flash",
+      "aiProvider": "auto",
+      "groqApiKey": "",
+      "groqModel": "openai/gpt-oss-20b",
       "eas": {
         "projectId": "17876f05-9a15-4ee5-9ecd-5b24d626f303"
       }

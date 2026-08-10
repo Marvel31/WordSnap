@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 type OcrSpaceResponse = {
   ParsedResults?: Array<{ ParsedText?: string }>;
@@ -25,11 +26,17 @@ export const readTextFromImage = async (uri: string) => {
   formData.append('language', 'eng');
   formData.append('isOverlayRequired', 'false');
   formData.append('OCREngine', '2');
-  formData.append('file', {
-    uri,
-    name: 'wordsnap.jpg',
-    type: 'image/jpeg'
-  } as unknown as Blob);
+  if (Platform.OS === 'web') {
+    const imageResponse = await fetch(uri);
+    const imageBlob = await imageResponse.blob();
+    formData.append('file', imageBlob, 'wordsnap.jpg');
+  } else {
+    formData.append('file', {
+      uri,
+      name: 'wordsnap.jpg',
+      type: 'image/jpeg'
+    } as unknown as Blob);
+  }
 
   const response = await fetch('https://api.ocr.space/parse/image', {
     method: 'POST',

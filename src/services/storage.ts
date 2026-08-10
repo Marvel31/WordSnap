@@ -5,11 +5,31 @@ import { LEVELS } from '../data/levelWords';
 const WORDS_KEY = 'wordsnap.words';
 const LEVEL_KEY = 'wordsnap.level';
 const FOLDERS_KEY = 'wordsnap.folders';
+const BOOK_DETAIL_SETTINGS_KEY = 'wordsnap.bookDetailSettings';
 const LEGACY_GRADE_KEY = 'wordsnap.grade';
 
 export const DEFAULT_BOOK_TITLE = '기본 단어장';
 
 const isLevel = (value: unknown): value is Level => typeof value === 'string' && LEVELS.includes(value as Level);
+
+export type BookDetailSettings = {
+  sortMode: 'latest' | 'oldest' | 'random' | 'az' | 'za';
+  memoryFilter: 'all' | 'unknown' | 'known';
+  hideMode: 'none' | 'word' | 'meaning';
+};
+
+const DEFAULT_BOOK_DETAIL_SETTINGS: BookDetailSettings = {
+  sortMode: 'latest',
+  memoryFilter: 'all',
+  hideMode: 'none'
+};
+
+const isSortMode = (value: unknown): value is BookDetailSettings['sortMode'] =>
+  typeof value === 'string' && ['latest', 'oldest', 'random', 'az', 'za'].includes(value);
+const isMemoryFilter = (value: unknown): value is BookDetailSettings['memoryFilter'] =>
+  typeof value === 'string' && ['all', 'unknown', 'known'].includes(value);
+const isHideMode = (value: unknown): value is BookDetailSettings['hideMode'] =>
+  typeof value === 'string' && ['none', 'word', 'meaning'].includes(value);
 
 const normalizeStoredWord = (word: WordEntry & { grade?: unknown }) => ({
   ...word,
@@ -69,4 +89,22 @@ export const loadFolders = async (words: WordEntry[]) => {
 
 export const saveFolders = async (folders: BookFolder[]) => {
   await AsyncStorage.setItem(FOLDERS_KEY, JSON.stringify(folders));
+};
+
+export const loadBookDetailSettings = async () => {
+  const raw = await AsyncStorage.getItem(BOOK_DETAIL_SETTINGS_KEY);
+  if (!raw) {
+    return DEFAULT_BOOK_DETAIL_SETTINGS;
+  }
+
+  const parsed = JSON.parse(raw) as Partial<BookDetailSettings>;
+  return {
+    sortMode: isSortMode(parsed.sortMode) ? parsed.sortMode : DEFAULT_BOOK_DETAIL_SETTINGS.sortMode,
+    memoryFilter: isMemoryFilter(parsed.memoryFilter) ? parsed.memoryFilter : DEFAULT_BOOK_DETAIL_SETTINGS.memoryFilter,
+    hideMode: isHideMode(parsed.hideMode) ? parsed.hideMode : DEFAULT_BOOK_DETAIL_SETTINGS.hideMode
+  };
+};
+
+export const saveBookDetailSettings = async (settings: BookDetailSettings) => {
+  await AsyncStorage.setItem(BOOK_DETAIL_SETTINGS_KEY, JSON.stringify(settings));
 };

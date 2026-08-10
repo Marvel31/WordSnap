@@ -54,6 +54,8 @@ Create a local `.env` file from `.env.example` and add your API key:
 OCR_SPACE_API_KEY=YOUR_OCR_SPACE_API_KEY
 GEMINI_API_KEY=YOUR_GEMINI_API_KEY
 GEMINI_MODEL=gemini-3.5-flash
+GROQ_API_KEY=YOUR_GROQ_API_KEY
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
 Then restart Expo:
@@ -64,14 +66,16 @@ npx expo start --host lan --clear
 
 If the key is empty, you can still paste English text into the OCR text box and test the word extraction flow.
 
-## Gemini Setup
+## AI Setup
 
-Gemini is used on the review screen to fill or improve Korean meanings, parts of speech, examples, and difficulty levels for selected candidate words.
+Gemini is used first to clean OCR text and extract vocabulary candidates. If Gemini fails because of quota or another API error, the app falls back to Groq.
 
-Add your Gemini API key in the same local `.env` file:
+Add one or both AI API keys in the same local `.env` file:
 
 ```bash
 GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+GROQ_API_KEY=YOUR_GROQ_API_KEY
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
 Then restart Expo:
@@ -80,7 +84,7 @@ Then restart Expo:
 npx expo start --host lan --clear
 ```
 
-For production, do not ship API keys inside the mobile app. Move Gemini calls behind your own backend before release.
+For production, do not ship API keys inside the mobile app. Move Gemini/Groq calls behind your own backend before release.
 
 ## Note About ML Kit
 

@@ -26,6 +26,18 @@ type GeminiResponse = {
   };
 };
 
+type GroqResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
+  failed_generation?: string;
+};
+
 const clampDifficulty = (value: unknown) => {
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) {
@@ -85,8 +97,11 @@ const parseJsonArray = (text: string) => {
   const trimmed = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
   const start = trimmed.indexOf('[');
   const end = trimmed.lastIndexOf(']');
-  const json = start >= 0 && end >= start ? trimmed.slice(start, end + 1) : trimmed;
-  return JSON.parse(json) as GeminiVocabularyItem[];
+  if (start >= 0 && end >= start) {
+    return JSON.parse(trimmed.slice(start, end + 1)) as GeminiVocabularyItem[];
+  }
+  const parsed = JSON.parse(trimmed) as GeminiVocabularyItem[] | { items?: GeminiVocabularyItem[] };
+  return Array.isArray(parsed) ? parsed : parsed.items ?? [];
 };
 
 const stripCodeBlock = (text: string) =>
@@ -174,13 +189,116 @@ const requestGeminiText = async (prompt: string, generationConfig: Record<string
   return text;
 };
 
+const extractGroqText = (data: GroqResponse) => data.choices?.[0]?.message?.content?.trim();
+
+const postGroqChat = async (apiKey: string, model: string, prompt: string, jsonMode = false) => {
+  const content = jsonMode
+    ? [
+        prompt,
+        '',
+        'Return JSON only. Do not include markdown, comments, or explanations.',
+        'Use this exact top-level shape:',
+        '{"items":[{"term":"","sourceWords":[],"originalText":"","meaning":"","partOfSpeech":"","example":"","difficulty":1,"entryType":"word"}]}'
+      ].join('\n')
+    : prompt;
+
+  return fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content
+        }
+      ],
+      temperature: jsonMode ? 0.1 : 0,
+      ...(jsonMode ? { response_format: { type: 'json_object' } } : {})
+    })
+  });
+};
+
+const requestGroqText = async (prompt: string, jsonMode = false) => {
+  const apiKey = Constants.expoConfig?.extra?.groqApiKey as string | undefined;
+  const model = (Constants.expoConfig?.extra?.groqModel as string | undefined) ?? 'openai/gpt-oss-20b';
+
+  if (!apiKey) {
+    throw new Error('GROQ_API_KEY_MISSING');
+  }
+
+  const response = await postGroqChat(apiKey, model, prompt, jsonMode);
+  const data = (await response.json()) as GroqResponse;
+  const text = extractGroqText(data);
+
+  if (response.ok && text) {
+    return text;
+  }
+
+  const errorMessage = data.error?.message || 'GROQ_FAILED';
+  if (jsonMode && errorMessage.toLowerCase().includes('json')) {
+    const retryPrompt = [
+      prompt,
+      '',
+      'Return only a valid JSON object with an "items" array.',
+      'No markdown. No explanation. No trailing commas.'
+    ].join('\n');
+    const retryResponse = await postGroqChat(apiKey, model, retryPrompt, false);
+    const retryData = (await retryResponse.json()) as GroqResponse;
+    const retryText = extractGroqText(retryData);
+    if (retryResponse.ok && retryText) {
+      return retryText;
+    }
+    throw new Error(retryData.error?.message || errorMessage);
+  }
+
+  throw new Error(errorMessage);
+};
+
+const requestAiText = async (prompt: string, generationConfig: Record<string, unknown>, jsonMode = false) => {
+  const provider = (Constants.expoConfig?.extra?.aiProvider as string | undefined)?.toLowerCase() ?? 'auto';
+
+  if (provider === 'groq') {
+    return requestGroqText(prompt, jsonMode);
+  }
+
+  if (provider === 'gemini') {
+    return requestGeminiText(prompt, generationConfig);
+  }
+
+  let geminiError: unknown;
+  try {
+    return await requestGeminiText(prompt, generationConfig);
+  } catch (error) {
+    geminiError = error;
+  }
+
+  try {
+    return await requestGroqText(prompt, jsonMode);
+  } catch (groqError) {
+    const geminiMessage = geminiError instanceof Error ? geminiError.message : '';
+    const groqMessage = groqError instanceof Error ? groqError.message : '';
+    if (geminiMessage === 'GEMINI_API_KEY_MISSING' && groqMessage === 'GROQ_API_KEY_MISSING') {
+      throw new Error('AI_API_KEY_MISSING');
+    }
+    throw new Error(groqMessage || geminiMessage || 'AI_FAILED');
+  }
+};
+
 const requestVocabularyItems = async (prompt: string) =>
   parseJsonArray(
-    await requestGeminiText(prompt, {
-      temperature: 0.1,
-      responseMimeType: 'application/json',
-      responseSchema: buildSchema()
-    })
+    await requestAiText(
+      prompt,
+      {
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        responseSchema: buildSchema()
+      },
+      true
+    )
   );
 
 export const cleanOcrTextWithGemini = async (ocrText: string) => {
@@ -199,9 +317,13 @@ export const cleanOcrTextWithGemini = async (ocrText: string) => {
   ].join('\n');
 
   const cleaned = stripCodeBlock(
-    await requestGeminiText(prompt, {
-      temperature: 0
-    })
+    await requestAiText(
+      prompt,
+      {
+        temperature: 0
+      },
+      false
+    )
   );
 
   return cleaned || ocrText;

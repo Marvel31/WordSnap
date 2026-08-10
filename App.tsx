@@ -27,9 +27,11 @@ import { createOcrImageSegments, joinOcrSegmentTexts, prepareImageForOcr } from 
 import { readTextFromImage } from './src/services/ocr';
 import {
   DEFAULT_BOOK_TITLE,
+  loadBookDetailSettings,
   loadFolders,
   loadLevel,
   loadWords,
+  saveBookDetailSettings,
   saveFolders,
   saveLevel,
   saveWords
@@ -74,6 +76,7 @@ export default function App() {
   const [memoryFilter, setMemoryFilter] = useState<MemoryFilter>('all');
   const [hideMode, setHideMode] = useState<HideMode>('none');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [hasLoadedBookDetailSettings, setHasLoadedBookDetailSettings] = useState(false);
   const [flashcardIndex, setFlashcardIndex] = useState(0);
   const [isMeaningVisible, setIsMeaningVisible] = useState(false);
   const [isLevelMenuOpen, setIsLevelMenuOpen] = useState(false);
@@ -89,14 +92,26 @@ export default function App() {
       const savedLevel = await loadLevel('Level 1');
       const savedWords = await loadWords();
       const savedFolders = await loadFolders(savedWords);
+      const savedBookDetailSettings = await loadBookDetailSettings();
       setLevel(savedLevel);
       setWords(savedWords);
       setFolders(savedFolders);
       setActiveFolderTitle(savedFolders[0]?.title ?? DEFAULT_BOOK_TITLE);
       setFolderInput(savedFolders[0]?.title ?? DEFAULT_BOOK_TITLE);
+      setSortMode(savedBookDetailSettings.sortMode);
+      setMemoryFilter(savedBookDetailSettings.memoryFilter);
+      setHideMode(savedBookDetailSettings.hideMode);
+      setHasLoadedBookDetailSettings(true);
     };
     boot();
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedBookDetailSettings) {
+      return;
+    }
+    saveBookDetailSettings({ sortMode, memoryFilter, hideMode });
+  }, [hasLoadedBookDetailSettings, hideMode, memoryFilter, sortMode]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -200,9 +215,7 @@ export default function App() {
 
   const openAllWords = (filter: MemoryFilter) => {
     setActiveFolderTitle(ALL_WORDS_TITLE);
-    setSortMode('latest');
     setMemoryFilter(filter);
-    setHideMode('none');
     setIsFilterOpen(false);
     setSelectedWordIds(new Set());
     setFlashcardIndex(0);
@@ -210,9 +223,6 @@ export default function App() {
   };
 
   const resetBookDetailControls = () => {
-    setSortMode('latest');
-    setMemoryFilter('all');
-    setHideMode('none');
     setIsFilterOpen(false);
   };
 
@@ -373,7 +383,7 @@ export default function App() {
       } catch (cleanError) {
         setOcrText(text);
         const cleanMessage = cleanError instanceof Error ? cleanError.message : 'GEMINI_FAILED';
-        if (cleanMessage !== 'GEMINI_API_KEY_MISSING') {
+        if (cleanMessage !== 'GEMINI_API_KEY_MISSING' && cleanMessage !== 'AI_API_KEY_MISSING') {
           Alert.alert('AI 문장 정리 실패', 'OCR 원문을 표시합니다. 직접 수정한 뒤 진행할 수 있어요.');
         }
       }
@@ -406,7 +416,7 @@ export default function App() {
       setMode('review');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'GEMINI_FAILED';
-      if (message === 'GEMINI_API_KEY_MISSING') {
+      if (message === 'GEMINI_API_KEY_MISSING' || message === 'AI_API_KEY_MISSING') {
         setCandidates(
           buildWordCandidates(
             ocrText,
@@ -415,7 +425,7 @@ export default function App() {
           )
         );
         setMode('review');
-        Alert.alert('Gemini 키가 없어요', '기본 단어 추출로 진행합니다.');
+        Alert.alert('AI 키가 없어요', '기본 단어 추출로 진행합니다.');
       } else {
         Alert.alert('AI 후보 추출 실패', message);
       }
