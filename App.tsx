@@ -41,11 +41,18 @@ import { BookFolder, Level, WordCandidate, WordEntry } from './src/types';
 
 type ViewMode = 'home' | 'capture' | 'review' | 'bookDetail' | 'flashcards' | 'folderSettings';
 type SortMode = 'latest' | 'oldest' | 'random' | 'az' | 'za';
-type MemoryFilter = 'all' | 'unknown' | 'known';
+type MemoryFilter = 'all' | 'unknown' | 'known' | 'favorite';
 type HideMode = 'none' | 'word' | 'meaning';
 const ALL_WORDS_TITLE = '전체 단어';
 const EXIT_TOAST_TIMEOUT = 2000;
 const EXPORT_VERSION = 1;
+
+const memoryFilterLabels: Record<MemoryFilter, string> = {
+  all: '전체',
+  unknown: '미암기',
+  known: '암기',
+  favorite: '중요'
+};
 
 const sortLabels: Record<SortMode, string> = {
   latest: '최신순',
@@ -170,6 +177,7 @@ export default function App() {
   const totalWords = words.length;
   const knownWords = words.filter((word) => word.knownCount > 0).length;
   const unknownWords = totalWords - knownWords;
+  const favoriteWords = words.filter((word) => word.isFavorite).length;
   const isAllWordsMode = activeFolderTitle === ALL_WORDS_TITLE;
 
   const activeWords = useMemo(() => {
@@ -177,7 +185,8 @@ export default function App() {
       (word) =>
         (isAllWordsMode || (word.bookTitle?.trim() || DEFAULT_BOOK_TITLE) === activeFolderTitle) &&
         word.difficulty >= LEVEL_MIN_DIFFICULTY[level] &&
-        (memoryFilter === 'all' || (memoryFilter === 'known' ? word.knownCount > 0 : word.knownCount === 0))
+        (memoryFilter === 'all' ||
+          (memoryFilter === 'known' ? word.knownCount > 0 : memoryFilter === 'favorite' ? word.isFavorite : word.knownCount === 0))
     );
 
     const copy = [...filtered];
@@ -196,7 +205,10 @@ export default function App() {
     return copy.sort((a, b) => a.id.localeCompare(b.id)).sort(() => Math.random() - 0.5);
   }, [activeFolderTitle, isAllWordsMode, level, memoryFilter, sortMode, words]);
 
-  const flashcardWords = useMemo(() => activeWords.filter((word) => word.knownCount === 0), [activeWords]);
+  const flashcardWords = useMemo(
+    () => (memoryFilter === 'all' ? activeWords.filter((word) => word.knownCount === 0) : activeWords),
+    [activeWords, memoryFilter]
+  );
   const currentCard = flashcardWords[flashcardIndex % Math.max(flashcardWords.length, 1)];
   const selectableCandidates = candidates.filter((candidate) => !candidate.isDuplicate);
   const selectedCandidateCount = selectableCandidates.filter((candidate) => candidate.selected).length;
@@ -548,6 +560,11 @@ export default function App() {
     );
   };
 
+  const toggleFavorite = async (wordId: string) => {
+    await persistWords(words.map((word) => (word.id === wordId ? { ...word, isFavorite: !word.isFavorite } : word)));
+    setFlashcardIndex(0);
+  };
+
   const setKnown = async (wordId: string, known: boolean) => {
     await persistWords(
       words.map((word) =>
@@ -614,7 +631,11 @@ export default function App() {
       await setKnown(currentCard.id, true);
       setFlashcardIndex((index) => (flashcardWords.length <= 1 ? 0 : index % (flashcardWords.length - 1)));
     } else {
-      await persistWords(words.map((word) => (word.id === currentCard.id ? { ...word, reviewCount: word.reviewCount + 1 } : word)));
+      await persistWords(
+        words.map((word) =>
+          word.id === currentCard.id ? { ...word, reviewCount: word.reviewCount + 1, knownCount: 0 } : word
+        )
+      );
       setFlashcardIndex((index) => (index + 1) % Math.max(flashcardWords.length, 1));
     }
     setIsMeaningVisible(false);
@@ -673,7 +694,8 @@ export default function App() {
         bookTitle: word.bookTitle?.trim() || DEFAULT_BOOK_TITLE,
         createdAt: word.createdAt || new Date().toISOString(),
         reviewCount: word.reviewCount ?? 0,
-        knownCount: word.knownCount ?? 0
+        knownCount: word.knownCount ?? 0,
+        isFavorite: word.isFavorite ?? false
       }));
       const existingKeys = new Set(words.map((word) => `${word.bookTitle || DEFAULT_BOOK_TITLE}::${word.word.toLowerCase()}`));
       const newWords = importedWords.filter((word) => !existingKeys.has(`${word.bookTitle || DEFAULT_BOOK_TITLE}::${word.word.toLowerCase()}`));
@@ -718,6 +740,7 @@ export default function App() {
             <StatBox value={totalWords} label="전체" color="#3b82f6" onPress={() => openAllWords('all')} />
             <StatBox value={unknownWords} label="미암기" color="#fb5a67" onPress={() => openAllWords('unknown')} />
             <StatBox value={knownWords} label="암기" color="#22a018" onPress={() => openAllWords('known')} />
+            <StatBox value={favoriteWords} label="중요" color="#f59e0b" onPress={() => openAllWords('favorite')} />
           </View>
           <View style={styles.fakeAd}>
             <Text style={styles.fakeAdText}>Word Snap</Text>
@@ -915,7 +938,7 @@ export default function App() {
           <View style={styles.filterBar}>
             <Pressable style={styles.filterToggle} onPress={() => setIsFilterOpen((open) => !open)}>
               <Text style={styles.filterToggleText}>
-                {sortLabels[sortMode]} · {memoryFilter === 'all' ? '전체' : memoryFilter === 'unknown' ? '미암기' : '암기'}
+                {sortLabels[sortMode]} · {memoryFilterLabels[memoryFilter]}
                 {hideMode !== 'none' ? ` · ${hideMode === 'word' ? '단어 숨김' : '뜻 숨김'}` : ''}
               </Text>
               <Text style={styles.filterToggleIcon}>{isFilterOpen ? '⌃' : '⌄'}</Text>
@@ -931,7 +954,8 @@ export default function App() {
                   options={[
                     { value: 'all', label: '전체' },
                     { value: 'unknown', label: '미암기' },
-                    { value: 'known', label: '암기' }
+                    { value: 'known', label: '암기' },
+                    { value: 'favorite', label: '중요' }
                   ]}
                   value={memoryFilter}
                   onChange={(value) => setMemoryFilter(value as MemoryFilter)}
@@ -955,15 +979,30 @@ export default function App() {
               >
                 <View style={styles.wordHeader}>
                   <Text style={styles.detailWord}>{hideMode === 'word' ? '••••' : word.word}</Text>
-                  <Pressable style={styles.speakerButton} onPress={() => speak(word.word)}>
-                    <Text style={styles.speakerText}>▶</Text>
-                  </Pressable>
+                  <View style={styles.wordHeaderButtons}>
+                    <Pressable
+                      style={[styles.favoriteButton, word.isFavorite && styles.favoriteButtonActive]}
+                      onPress={() => toggleFavorite(word.id)}
+                    >
+                      <Text style={[styles.favoriteText, word.isFavorite && styles.favoriteTextActive]}>
+                        {word.isFavorite ? '♥' : '♡'}
+                      </Text>
+                    </Pressable>
+                    <Pressable style={styles.speakerButton} onPress={() => speak(word.word)}>
+                      <Text style={styles.speakerText}>▶</Text>
+                    </Pressable>
+                  </View>
                 </View>
                 {word.partOfSpeech ? <Text style={styles.meta}>{word.partOfSpeech}</Text> : null}
                 {hideMode !== 'meaning' ? <Text style={styles.definition}>{word.meaning}</Text> : <Text style={styles.definition}>뜻 숨김</Text>}
                 {word.example ? <Text style={styles.example}>{word.example}</Text> : null}
                 <View style={styles.wordActions}>
                   <Pressable onPress={() => moveWord(word.id)}><Text style={styles.wordActionText}>이동</Text></Pressable>
+                  <Pressable onPress={() => toggleFavorite(word.id)}>
+                    <Text style={word.isFavorite ? styles.favoriteActionText : styles.wordActionText}>
+                      {word.isFavorite ? '중요' : '중요 표시'}
+                    </Text>
+                  </Pressable>
                   <Pressable onPress={() => toggleKnown(word.id)}>
                     <Text style={word.knownCount > 0 ? styles.knownToggleText : styles.wordActionText}>
                       {word.knownCount > 0 ? '암기 완료' : '미암기'}
@@ -979,16 +1018,30 @@ export default function App() {
 
       {mode === 'flashcards' && (
         <View style={[styles.content, isTablet && styles.tabletFormContent]}>
-          <Text style={styles.sectionTitle}>{activeFolderTitle} 플래시카드</Text>
+          <Text style={styles.sectionTitle}>
+            {activeFolderTitle} 플래시카드{memoryFilter !== 'all' ? ` · ${memoryFilterLabels[memoryFilter]}` : ''}
+          </Text>
           {currentCard ? (
             <View style={[styles.flashcard, isTablet && styles.tabletFlashcard]}>
-              <Text style={styles.cardCount}>{flashcardIndex + 1} / {flashcardWords.length}</Text>
+              <View style={styles.cardTopRow}>
+                <Text style={styles.cardCount}>{flashcardIndex + 1} / {flashcardWords.length}</Text>
+                <View style={styles.cardTopActions}>
+                  <Pressable
+                    style={[styles.favoriteButton, currentCard.isFavorite && styles.favoriteButtonActive]}
+                    onPress={() => toggleFavorite(currentCard.id)}
+                  >
+                    <Text style={[styles.favoriteText, currentCard.isFavorite && styles.favoriteTextActive]}>
+                      {currentCard.isFavorite ? '♥' : '♡'}
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.speakerButton} onPress={() => speak(currentCard.word)}>
+                    <Text style={styles.speakerText}>▶</Text>
+                  </Pressable>
+                </View>
+              </View>
               <View style={styles.cardWordRow}>
                 <Pressable style={styles.cardWordPressable} onPress={() => speak(currentCard.word)}>
                   <Text style={styles.cardWord}>{currentCard.word}</Text>
-                </Pressable>
-                <Pressable style={styles.speakerButton} onPress={() => speak(currentCard.word)}>
-                  <Text style={styles.speakerText}>▶</Text>
                 </Pressable>
               </View>
               <Pressable style={styles.meaningBox} onPress={() => setIsMeaningVisible((visible) => !visible)}>
@@ -1261,21 +1314,21 @@ const styles = StyleSheet.create({
   tabletFormContent: { width: '100%', maxWidth: 880, alignSelf: 'center', paddingHorizontal: 32 },
   detailContent: { paddingBottom: 48 },
   tabletDetailContent: { width: '100%', maxWidth: 1180, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 16 },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 36 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, paddingVertical: 28 },
   statBox: {
-    width: '30%',
-    aspectRatio: 0.95,
+    flex: 1,
+    minHeight: 98,
     borderWidth: 1,
     borderColor: '#e5e7eb',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    paddingTop: 28,
-    paddingBottom: 18
+    paddingTop: 16,
+    paddingBottom: 12
   },
-  statDash: { width: 22, height: 4, borderRadius: 2, marginTop: 4, marginBottom: 8 },
-  statValue: { fontSize: 38, fontWeight: '900', lineHeight: 44 },
-  statLabel: { fontSize: 17, fontWeight: '800', marginTop: 14, marginBottom: 6 },
+  statDash: { width: 20, height: 4, borderRadius: 2, marginTop: 2, marginBottom: 6 },
+  statValue: { fontSize: 30, fontWeight: '900', lineHeight: 35 },
+  statLabel: { fontSize: 14, fontWeight: '800', marginTop: 10, marginBottom: 4 },
   fakeAd: { backgroundColor: '#f1f5f9', padding: 22, marginHorizontal: -20 },
   fakeAdText: { fontSize: 22, fontWeight: '900', color: '#172033' },
   fakeAdSub: { color: '#64748b', marginTop: 6, fontWeight: '700' },
@@ -1345,6 +1398,7 @@ const styles = StyleSheet.create({
   wordItemSelected: { borderColor: '#1f6feb', backgroundColor: '#eff6ff' },
   faded: { opacity: 0.55 },
   wordHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  wordHeaderButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   word: { fontSize: 22, fontWeight: '900', color: '#111827', flex: 1 },
   meaning: { flex: 1, textAlign: 'right', color: '#1f6feb', fontSize: 16, fontWeight: '800' },
   meta: { color: '#94a3b8', fontSize: 13, fontWeight: '800' },
@@ -1394,18 +1448,25 @@ const styles = StyleSheet.create({
   detailWord: { fontSize: 40, color: '#000000', fontWeight: '500', flex: 1 },
   speakerButton: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#0f2864', alignItems: 'center', justifyContent: 'center' },
   speakerText: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  favoriteButton: { width: 54, height: 54, borderRadius: 27, borderWidth: 2, borderColor: '#f59e0b', backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
+  favoriteButtonActive: { backgroundColor: '#fff7ed' },
+  favoriteText: { color: '#f59e0b', fontSize: 27, fontWeight: '900', lineHeight: 31 },
+  favoriteTextActive: { color: '#f97316' },
   definition: { backgroundColor: '#f8fafc', padding: 16, fontSize: 18, color: '#111827', lineHeight: 28 },
   wordActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 28 },
   wordActionText: { color: '#9ca3af', fontSize: 16, fontWeight: '800' },
+  favoriteActionText: { color: '#f59e0b', fontSize: 16, fontWeight: '900' },
   knownToggleText: { color: '#1f6feb', fontSize: 16, fontWeight: '900' },
   deleteText: { color: '#dc2626', fontSize: 16, fontWeight: '800' },
   emptyState: { minHeight: 180, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0' },
   emptyStateText: { color: '#64748b', fontWeight: '700' },
   flashcard: { minHeight: 380, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0', padding: 20, justifyContent: 'space-between', gap: 18 },
   tabletFlashcard: { minHeight: 460, maxWidth: 720, width: '100%', alignSelf: 'center', padding: 32 },
+  cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  cardTopActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardCount: { color: '#64748b', fontWeight: '800' },
   cardWord: { textAlign: 'center', color: '#172033', fontSize: 42, fontWeight: '900' },
-  cardWordRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14 },
+  cardWordRow: { alignItems: 'center', justifyContent: 'center' },
   cardWordPressable: { flexShrink: 1 },
   meaningBox: { minHeight: 96, borderRadius: 8, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', padding: 16 },
   cardMeaning: { color: '#1f6feb', fontSize: 24, fontWeight: '900', textAlign: 'center' },

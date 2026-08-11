@@ -22,6 +22,7 @@ export type WordEntry = {
   createdAt: string;
   reviewCount: number;
   knownCount: number;
+  isFavorite?: boolean;
 };
 
 export type WordCandidate = {

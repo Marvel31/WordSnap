@@ -14,7 +14,7 @@ const isLevel = (value: unknown): value is Level => typeof value === 'string' &&
 
 export type BookDetailSettings = {
   sortMode: 'latest' | 'oldest' | 'random' | 'az' | 'za';
-  memoryFilter: 'all' | 'unknown' | 'known';
+  memoryFilter: 'all' | 'unknown' | 'known' | 'favorite';
   hideMode: 'none' | 'word' | 'meaning';
 };
 
@@ -27,7 +27,7 @@ const DEFAULT_BOOK_DETAIL_SETTINGS: BookDetailSettings = {
 const isSortMode = (value: unknown): value is BookDetailSettings['sortMode'] =>
   typeof value === 'string' && ['latest', 'oldest', 'random', 'az', 'za'].includes(value);
 const isMemoryFilter = (value: unknown): value is BookDetailSettings['memoryFilter'] =>
-  typeof value === 'string' && ['all', 'unknown', 'known'].includes(value);
+  typeof value === 'string' && ['all', 'unknown', 'known', 'favorite'].includes(value);
 const isHideMode = (value: unknown): value is BookDetailSettings['hideMode'] =>
   typeof value === 'string' && ['none', 'word', 'meaning'].includes(value);
 
@@ -39,7 +39,8 @@ const normalizeStoredWord = (word: WordEntry & { grade?: unknown }) => ({
   originalText: word.originalText,
   partOfSpeech: word.partOfSpeech,
   example: word.example,
-  entryType: word.entryType ?? 'word'
+  entryType: word.entryType ?? 'word',
+  isFavorite: word.isFavorite ?? false
 });
 
 export const loadWords = async () => {

@@ -106,5 +106,6 @@ export const candidatesToWordEntries = (candidates: WordCandidate[], bookTitle: 
       sourceSentence: candidate.sourceSentence,
       createdAt: new Date().toISOString(),
       reviewCount: 0,
-      knownCount: 0
+      knownCount: 0,
+      isFavorite: false
     }));
