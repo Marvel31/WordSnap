@@ -562,7 +562,6 @@ export default function App() {
 
   const toggleFavorite = async (wordId: string) => {
     await persistWords(words.map((word) => (word.id === wordId ? { ...word, isFavorite: !word.isFavorite } : word)));
-    setFlashcardIndex(0);
   };
 
   const setKnown = async (wordId: string, known: boolean) => {
